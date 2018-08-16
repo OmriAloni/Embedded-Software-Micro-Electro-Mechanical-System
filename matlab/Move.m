@@ -1,0 +1,309 @@
+
+function [ax,ay,az] = Move()
+%%Connection%%
+global MyCOM
+disp('Move');
+
+global status; %% get out of the loop
+status = 0;
+
+%Cube generate
+A = [-0.1 -0.05 0.01];
+B = [0.1 -0.05 0.01];
+C = [-0.1 0.05 0.01];
+D = [-0.1 -0.05 -0.01];
+E = [-0.1 0.05 -0.01];
+F = [0.1 -0.05 -0.01];
+G = [0.1 0.05 0.01];
+H = [0.1 0.05 -0.01];
+P = [A;B;F;H;G;C;A;D;E;H;F;D;E;C;G;B];
+
+plot3(P(:,1),P(:,2),P(:,3),'g');% original cube
+grid on;
+axis([-5 5 -5 5 -5 5]);
+drawnow;
+
+index = 1;
+
+a = [0 0 0];
+aRaw =[0 0 0];
+aRefe =[0 0 1];
+v = [0 0 0];
+vRaw = [0 0 0];
+
+xx(index)=0; xy(index)=0; xz(index)=0;
+
+sumX=0; sumY=0; sumZ=0;
+countLowersX=0; countLowersY=0; countLowersZ=0;
+
+pitch(index)=0; roll(index)=0; yaw(index)=0;
+pitchAverage(index)=0; rollAverage(index)=0; yawAverage(index)=0;
+
+pitchStart=0; rollStart=0; yawStart=0;
+
+X(1) = -0.1; Y(1) = -0.05; Z(1) = 0.01;
+
+axisScale=1;
+textScale=1;
+
+first = 1 ;
+while status == 0
+    if first == 1
+        for c=1 ; 25 
+            fprintf (MyCOM, 'P');
+            pitchstr = fscanf (MyCOM, '%c', 7); %% get the 25 initial values - consider them noise
+            yawstr = fscanf (MyCOM, '%c', 7);
+            rollstr = fscanf (MyCOM, '%c', 7);
+
+            axStr = fscanf (MyCOM, '%c', 7);
+            ayStr = fscanf (MyCOM, '%c', 7);
+            azStr = fscanf (MyCOM, '%c', 7);
+        end
+        
+        %sent as string *1000, now we divide in 1000 to get the real num in
+        %rad
+        pitchStart = deg2rad(str2double(pitchstr)/1000);
+        rollStart = deg2rad(str2double(rollstr)/1000);
+        yawStart = deg2rad(str2double(yawstr)/1000);
+
+        first=0;
+    end
+    
+    tic;
+    index = index + 1;
+    %% get the real values
+    fprintf (MyCOM, 'P');
+    pitchstr = fscanf (MyCOM, '%c', 7);
+    yawstr = fscanf (MyCOM, '%c', 7);
+    rollstr = fscanf (MyCOM, '%c', 7);
+    
+    axStr = fscanf (MyCOM, '%c', 7);
+    ayStr = fscanf (MyCOM, '%c', 7);
+    azStr =fscanf (MyCOM, '%c', 7);
+    
+    pitch(index) = deg2rad(str2double(pitchstr)/1000);
+    roll(index) = deg2rad(str2double(rollstr)/1000);
+    yaw(index) = deg2rad(str2double(yawstr)/1000);
+
+   % dcm = angle2dcm(yaw-yawStart, pitch-pitchStart, roll-rollStart);
+
+    aNow  = [str2double(axStr)/1000 str2double(ayStr)/1000 str2double(azStr)/1000];
+    
+   % aNow  = dcm*[str2double(axStr)/1000 str2double(ayStr)/1000 str2double(azStr)/1000]';
+   % aNow=aNow';
+    a =[a ; aNow];
+    aRaw = [aRaw ; aNow];
+    
+    %Reference filter
+    if(index>=6)
+       averageXRefe=sum( aRaw(index-5:index-1 , 1) )/5;
+       averageYRefe=sum( aRaw(index-5:index-1, 2) )/5;
+       averageZRefe=sum( aRaw(index-5:index-1,3) )/5;
+       if(averageXRefe-0.003<aNow(1) &&  aNow(1)<averageXRefe+0.003)
+          aRefe(1)=averageXRefe;
+       end
+       if(averageYRefe-0.003<aNow(2) &&  aNow(2)<averageYRefe+0.003)
+          aRefe(2)=averageYRefe;
+       end
+       if(averageZRefe-0.003<aNow(3) &&  aNow(3)<averageZRefe+0.003)
+          aRefe(3)=averageZRefe;
+       end       
+    end
+    
+    if(index>10)
+       pitchAverage(index)= sum( pitch(index-5:index) )/6;
+       rollAverage(index)= sum( roll(index-5:index) )/6;
+       yawAverage(index)= sum( yaw(index-5:index) )/6;
+       if abs(pitchAverage(index)-pitchAverage(index-1))>0.05 || abs(rollAverage(index)-rollAverage(index-1))>0.05 || abs(yawAverage(index)-yawAverage(index-1))>1
+         aRefe(1)=sum( aRaw(index-2:index ,1) )/3;
+         aRefe(2)=sum( aRaw(index-2:index ,2) )/3;       
+      end
+   end
+    
+    a(index, 1) = a(index, 1)-aRefe(1);
+    a(index, 2) = a(index, 2)-aRefe(2);
+    a(index, 3) = a(index, 3)-aRefe(3);
+
+    %Low (close to zero) values filter
+    if(abs(a(index, 1))<0.005)
+       a(index, 1)=0;
+       a(index-1, 1)=0;
+    end
+    
+    if(abs(a(index, 2))<0.005)
+       a(index, 2)=0;
+       a(index-1, 2)=0;
+    end
+    
+    if(abs(a(index, 3))<0.005)
+       a(index, 3)=0;
+       a(index-1, 3)=0;
+    end
+    
+    %Constant low values filter
+    if(abs(a(index, 1))<0.03)
+        countLowersX=countLowersX+1;
+        sumX=sumX+a(index, 1);
+    else
+        countLowersX=0;
+        sumX=0;
+    end
+    
+    if(abs(a(index, 2))<0.03)
+        countLowersY=countLowersY+1;
+        sumY=sumY+a(index, 2);
+    else
+        countLowersY=0;
+        sumY=0;
+    end
+        
+    if(abs(a(index, 3))<0.03)
+        countLowersZ=countLowersZ+1;
+        sumZ=sumZ+a(index, 3);
+    else
+        countLowersZ=0;
+        sumZ=0;
+    end
+
+    if(countLowersX>10)
+        averageX=sumX/countLowersX;
+        if abs(averageX)<0.015
+            v(index-1, 1)=0;
+            a(index-1, 1)=0;
+            a(index, 1)=0;
+        end
+    end
+    
+    if(countLowersY>10)
+        averageY=sumY/countLowersY;
+        if abs(averageY)<0.015
+           v(index-1, 2)=0;
+           a(index-1, 2)=0;
+           a(index, 2)=0;
+        end
+    end 
+    
+    if(countLowersZ>10)
+        averageZ=sumZ/countLowersZ;
+        if abs(averageZ)<0.015
+           v(index-1, 3)=0;
+           a(index-1, 3)=0;
+           a(index, 3)=0;
+        end
+    end
+  
+
+a(index, :)=a(index, :)*5;
+    
+    now = toc;
+    now = 0.08; %12.5Hz 
+    %first integral to get velocity 
+    v(index, 1)=v(index-1, 1)+trapezIntegral(0,now,a(index-1, 1),a(index, 1));
+    v(index, 2)=v(index-1, 2)+trapezIntegral(0,now,a(index-1, 2),a(index, 2));
+    v(index, 3)=v(index-1, 3)+trapezIntegral(0,now,a(index-1,3),a(index, 3));
+    
+    vRaw(index, 1)=vRaw(index-1, 1)+trapezIntegral(0,now,a(index-1, 1),a(index, 1));
+    vRaw(index, 2)=vRaw(index-1, 2)+trapezIntegral(0,now,a(index-1, 2),a(index, 2));
+    vRaw(index, 3)=vRaw(index-1, 3)+trapezIntegral(0,now,a(index-1,3),a(index, 3));
+   
+    %Stopping filter 
+   if(index>5)
+       if(vRaw(index-1, 1) ~= 0) 
+    if(sign(v(index, 1)) ~= sign(v(index-1, 1)) && v(index, 1)~=0 )  %if chagnge in velocity sigh has been made
+       totaldis=abs(sum( xx( index-5:index-1) ));  %the total change in distance
+       if(totaldis>0)%if there was change in distace, then there was a move the should be stopped 
+          v(index, 1)=0;
+       end
+    end
+       end
+     if(vRaw(index-1, 2) ~= 0) 
+    if(sign(v(index, 2)) ~= sign(v(index-1, 2))  && v(index, 2)~=0 )  %if chagnge in velocity sigh has been made
+       totaldis=abs(sum( xy( index-5:index-1) ));  %the total change in distance
+       if(totaldis>0) %if there was change in distace, then there was a move the should be stopped 
+          v(index, 2)=0;
+       end
+    end
+     end
+      if(v(index-1, 3) ~= 0)
+        if(sign(v(index, 3)) ~= sign(v(index-1, 3))  && v(index, 3)~=0 )  %if chagnge in velocity sigh has been made
+            totaldis=abs(sum( xz( index-5:index-1) ));  %the total change in distance
+            if(totaldis>0) %if there was change in distace, then there was a move the should be stopped 
+                v(index, 3)=0;
+                %The Thinking behind  "if (totaldis>0.1)" condition is to avoid situation
+                %in which after a big change in Z axis we get an instant
+                %change in y or x axis (one that is not reasonable to
+                %occer)
+                if (totaldis>0.1)
+                   v(index,1)=0;
+                   v(index, 2)=0;
+                end
+            end
+        end
+      end
+    
+    end
+    
+    %second integral to get position 
+    xx(index)=trapezIntegral(0,now,v(index-1, 1),v(index, 1));
+    xy(index)=trapezIntegral(0,now,v(index-1, 2),v(index, 2));
+    xz(index)=trapezIntegral(0,now,v(index-1, 3),v(index, 3));
+    
+    %in order to avoid high high changes in distance
+    if(xx(index)>0.05)
+       xx(index)=xx(index)/10;
+    end
+    if(xy(index)>0.05)
+       xy(index)=xy(index)/10;
+    end
+    if(xz(index)>0.05)
+       xz(index)=xz(index)/10;
+    end
+    
+    dx = [xx(index),xy(index),xz(index)]; %change in position      
+    
+    A = A + dx;
+    B = B + dx;
+    C = C + dx;
+    D = D + dx;
+    E = E + dx;
+    F = F + dx;
+    G = G + dx;
+    H = H + dx;
+    P = [A;B;F;H;G;C;A;D;E;H;F;D;E;C;G;B];
+    
+    X(index) = X(index-1) + xx(index);
+    Y(index) = Y(index-1) + xy(index);
+    Z(index) = Z(index-1) + xz(index);
+    
+    if( abs(X(index))>axisScale || abs(Y(index))>axisScale || abs(Z(index))>axisScale )
+       axisScale=axisScale*1.5;
+       textScale=textScale+1;
+    end
+    arr = [X(index) Y(index) Z(index)];
+    disp (arr);
+    
+    plot3(P(:,1),P(:,2),P(:,3),'g', X,Y,Z,'r'); % original cube and line
+    grid on;
+    axis([-axisScale axisScale -axisScale axisScale -axisScale axisScale]);
+    
+    xlabel('x') % x-axis label
+    ylabel('y') % y-axis label
+    zlabel('z') % z-axis label
+    
+    text(-0.7,1.7,1.4*textScale,  num2str(v(index, 1)));
+    text(-0.7,1.7,1.3*textScale,  num2str(v(index, 2)))
+    text(-0.7,1.7,1.2*textScale,  num2str(v(index, 3)))
+    
+    text(-0.7,1.7,1.1*textScale,  num2str(a(index, 1)));
+    text(-0.7,1.7,1.0*textScale,  num2str(a(index, 2)))
+    text(-0.7,1.7,0.9*textScale,  num2str(a(index, 3)))
+
+    drawnow;
+        
+end
+
+function[ans0] = trapezIntegral(t0,t1,f0,f1)
+ans0= (t1-t0)*(f0+f1)/2;
+end 
+
+end
